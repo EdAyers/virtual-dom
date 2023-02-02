@@ -1,79 +1,72 @@
-var isArray = require("x-is-array")
+import { diffProps } from './diff-props'
+import { Elt, handleThunk, isThunk, isVNode, isVText, isWidget, Moves, Patch, Patches, PatchKind, Thunk, VirtualNode } from './vnode'
 
-var VPatch = require("../vnode/vpatch")
-var isVNode = require("../vnode/is-vnode")
-var isVText = require("../vnode/is-vtext")
-var isWidget = require("../vnode/is-widget")
-var isThunk = require("../vnode/is-thunk")
-var handleThunk = require("../vnode/handle-thunk")
+function VPatch(type: PatchKind, vNode, patch): Patch {
+    return { type, vNode, patch }
+}
 
-var diffProps = require("./diff-props")
-
-module.exports = diff
-
-function diff(a, b) {
-    var patch = { a: a }
+export function diff(a: Elt, b: Elt) {
+    const patch: Patches = new Patches(a)
     walk(a, b, patch, 0)
     return patch
 }
 
-function walk(a, b, patch, index) {
+function walk(a: Elt, b: Elt | undefined, patch: Patches, index: number) {
     if (a === b) {
         return
     }
 
-    var apply = patch[index]
-    var applyClear = false
+    let apply: Patch[] = []
+    let applyClear = false
 
     if (isThunk(a) || isThunk(b)) {
         thunks(a, b, patch, index)
-    } else if (b == null) {
+    } else if (!b) {
 
         // If a is a widget we will add a remove patch for it
         // Otherwise any child widgets/hooks must be destroyed.
         // This prevents adding two remove patches for a widget.
         if (!isWidget(a)) {
             clearState(a, patch, index)
-            apply = patch[index]
+            apply = patch.get(index)
         }
 
-        apply = appendPatch(apply, new VPatch(VPatch.REMOVE, a, b))
+        apply.push(VPatch(PatchKind.REMOVE, a, b))
     } else if (isVNode(b)) {
         if (isVNode(a)) {
             if (a.tagName === b.tagName &&
                 a.namespace === b.namespace &&
                 a.key === b.key) {
-                var propsPatch = diffProps(a.properties, b.properties)
+                const propsPatch = diffProps(a.properties, b.properties)
                 if (propsPatch) {
-                    apply = appendPatch(apply,
-                        new VPatch(VPatch.PROPS, a, propsPatch))
+                    apply.push(VPatch(PatchKind.PROPS, a, propsPatch))
                 }
                 apply = diffChildren(a, b, patch, apply, index)
             } else {
-                apply = appendPatch(apply, new VPatch(VPatch.VNODE, a, b))
+                apply.push(VPatch(PatchKind.VNODE, a, b))
                 applyClear = true
             }
         } else {
-            apply = appendPatch(apply, new VPatch(VPatch.VNODE, a, b))
+            apply.push(VPatch(PatchKind.VNODE, a, b))
             applyClear = true
         }
     } else if (isVText(b)) {
         if (!isVText(a)) {
-            apply = appendPatch(apply, new VPatch(VPatch.VTEXT, a, b))
+            apply.push(VPatch(PatchKind.VTEXT, a, b))
             applyClear = true
         } else if (a.text !== b.text) {
-            apply = appendPatch(apply, new VPatch(VPatch.VTEXT, a, b))
+            apply.push(VPatch(PatchKind.VTEXT, a, b))
         }
     } else if (isWidget(b)) {
         if (!isWidget(a)) {
             applyClear = true
         }
 
-        apply = appendPatch(apply, new VPatch(VPatch.WIDGET, a, b))
+        apply.push(VPatch(PatchKind.WIDGET, a, b))
     }
 
     if (apply) {
-        patch[index] = apply
+        patch.push(index, apply)
     }
 
     if (applyClear) {
@@ -81,7 +74,7 @@ function walk(a, b, patch, index) {
     }
 }
 
-function diffChildren(a, b, patch, apply, index) {
+function diffChildren(a: VirtualNode, b: VirtualNode, patch: Patches, apply: Patch[], index: number) {
     var aChildren = a.children
     var orderedSet = reorder(aChildren, b.children)
     var bChildren = orderedSet.children
@@ -98,8 +91,8 @@ function diffChildren(a, b, patch, apply, index) {
         if (!leftNode) {
             if (rightNode) {
                 // Excess nodes in b need to be added
-                apply = appendPatch(apply,
-                    new VPatch(VPatch.INSERT, null, rightNode))
+                apply.push(
+                    VPatch(PatchKind.INSERT, null, rightNode))
             }
         } else {
             walk(leftNode, rightNode, patch, index)
@@ -112,8 +105,8 @@ function diffChildren(a, b, patch, apply, index) {
 
     if (orderedSet.moves) {
         // Reorder nodes last
-        apply = appendPatch(apply, new VPatch(
-            VPatch.ORDER,
+        apply.push(VPatch(
+            PatchKind.ORDER,
             a,
             orderedSet.moves
         ))
@@ -122,7 +115,7 @@ function diffChildren(a, b, patch, apply, index) {
     return apply
 }
 
-function clearState(vNode, patch, index) {
+function clearState(vNode: Elt, patch: Patches, index: number) {
     // TODO: Make this a single walk, not two
     unhook(vNode, patch, index)
     destroyWidgets(vNode, patch, index)
@@ -130,13 +123,10 @@ function clearState(vNode, patch, index) {
 
 // Patch records for all destroyed widgets must be added because we need
 // a DOM node reference for the destroy function
-function destroyWidgets(vNode, patch, index) {
+function destroyWidgets(vNode: Elt, patch: Patches, index: number) {
     if (isWidget(vNode)) {
         if (typeof vNode.destroy === "function") {
-            patch[index] = appendPatch(
-                patch[index],
-                new VPatch(VPatch.REMOVE, vNode, null)
-            )
+            patch.set(index, VPatch(PatchKind.REMOVE, vNode, null))
         }
     } else if (isVNode(vNode) && (vNode.hasWidgets || vNode.hasThunks)) {
         var children = vNode.children
@@ -152,16 +142,16 @@ function destroyWidgets(vNode, patch, index) {
             }
         }
     } else if (isThunk(vNode)) {
-        thunks(vNode, null, patch, index)
+        thunks(vNode, undefined, patch, index)
     }
 }
 
 // Create a sub-patch for thunks
-function thunks(a, b, patch, index) {
+function thunks(a: Elt, b: Elt | undefined, patch: Patches, index: number) {
     var nodes = handleThunk(a, b)
-    var thunkPatch = diff(nodes.a, nodes.b)
+    var thunkPatch = diff(nodes.a, nodes.b!)
     if (hasPatches(thunkPatch)) {
-        patch[index] = new VPatch(VPatch.THUNK, null, thunkPatch)
+        patch.push(index, VPatch(PatchKind.THUNK, null, thunkPatch))
     }
 }
 
@@ -176,17 +166,14 @@ function hasPatches(patch) {
 }
 
 // Execute hooks when two nodes are identical
-function unhook(vNode, patch, index) {
+function unhook(vNode: Elt, patch: Patches, index) {
     if (isVNode(vNode)) {
         if (vNode.hooks) {
-            patch[index] = appendPatch(
-                patch[index],
-                new VPatch(
-                    VPatch.PROPS,
-                    vNode,
-                    undefinedKeys(vNode.hooks)
-                )
-            )
+            patch.push(index, VPatch(
+                PatchKind.PROPS,
+                vNode,
+                undefinedKeys(vNode.hooks)
+            ))
         }
 
         if (vNode.descendantHooks || vNode.hasThunks) {
@@ -219,7 +206,7 @@ function undefinedKeys(obj) {
 }
 
 // List diff, naive left to right reordering
-function reorder(aChildren, bChildren) {
+function reorder(aChildren: Elt[], bChildren: Elt[]): { children: Elt, moves: Moves } {
     // O(M) time, O(M) memory
     var bChildIndex = keyIndex(bChildren)
     var bKeys = bChildIndex.keys
@@ -253,7 +240,7 @@ function reorder(aChildren, bChildren) {
 
     // Iterate through a and match a node in b
     // O(N) time,
-    for (var i = 0 ; i < aChildren.length; i++) {
+    for (var i = 0; i < aChildren.length; i++) {
         var aItem = aChildren[i]
         var itemIndex
 
@@ -331,7 +318,7 @@ function reorder(aChildren, bChildren) {
                         simulateItem = simulate[simulateIndex]
                         // if the remove didn't put the wanted item in place, we need to insert it
                         if (!simulateItem || simulateItem.key !== wantedItem.key) {
-                            inserts.push({key: wantedItem.key, to: k})
+                            inserts.push({ key: wantedItem.key, to: k })
                         }
                         // items are matching, so skip ahead
                         else {
@@ -339,11 +326,11 @@ function reorder(aChildren, bChildren) {
                         }
                     }
                     else {
-                        inserts.push({key: wantedItem.key, to: k})
+                        inserts.push({ key: wantedItem.key, to: k })
                     }
                 }
                 else {
-                    inserts.push({key: wantedItem.key, to: k})
+                    inserts.push({ key: wantedItem.key, to: k })
                 }
                 k++
             }
@@ -359,7 +346,7 @@ function reorder(aChildren, bChildren) {
     }
 
     // remove all the remaining nodes from simulate
-    while(simulateIndex < simulate.length) {
+    while (simulateIndex < simulate.length) {
         simulateItem = simulate[simulateIndex]
         removes.push(remove(simulate, simulateIndex, simulateItem && simulateItem.key))
     }
@@ -409,19 +396,5 @@ function keyIndex(children) {
     return {
         keys: keys,     // A hash of key name to index
         free: free      // An array of unkeyed item indices
-    }
-}
-
-function appendPatch(apply, patch) {
-    if (apply) {
-        if (isArray(apply)) {
-            apply.push(patch)
-        } else {
-            apply = [apply, patch]
-        }
-
-        return apply
-    } else {
-        return patch
     }
 }

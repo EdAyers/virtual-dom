@@ -1,15 +1,7 @@
-var document = require("global/document")
+import { isVNode, isVText, isWidget, handleThunk, RenderOptions, VirtualNode, Elt } from './vnode'
+import { applyProperties } from './apply-properties'
 
-var applyProperties = require("./apply-properties")
-
-var isVNode = require("../vnode/is-vnode.js")
-var isVText = require("../vnode/is-vtext.js")
-var isWidget = require("../vnode/is-widget.js")
-var handleThunk = require("../vnode/handle-thunk.js")
-
-module.exports = createElement
-
-function createElement(vnode, opts) {
+export function createElement(vnode: Elt, opts: RenderOptions): Node | null {
     var doc = opts ? opts.document || document : document
     var warn = opts ? opts.warn : null
 
@@ -26,7 +18,7 @@ function createElement(vnode, opts) {
         return null
     }
 
-    var node = (vnode.namespace === null) ?
+    const node: Element = (vnode.namespace === null) ?
         doc.createElement(vnode.tagName) :
         doc.createElementNS(vnode.namespace, vnode.tagName)
 

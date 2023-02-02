@@ -1,12 +1,8 @@
-var isObject = require("is-object")
-var isHook = require("../vnode/is-vhook.js")
+import { isVHook as isHook, Props } from './vnode'
 
-module.exports = applyProperties
 
-function applyProperties(node, props, previous) {
-    for (var propName in props) {
-        var propValue = props[propName]
-
+export function applyProperties(node: Element, props: Props, previous?: Props) {
+    for (const [propName, propValue] of props) {
         if (propValue === undefined) {
             removeProperty(node, propName, propValue, previous);
         } else if (isHook(propValue)) {
@@ -14,7 +10,7 @@ function applyProperties(node, props, previous) {
             if (propValue.hook) {
                 propValue.hook(node,
                     propName,
-                    previous ? previous[propName] : undefined)
+                    previous ? previous.get(propName) : undefined)
             }
         } else {
             if (isObject(propValue)) {
@@ -26,9 +22,9 @@ function applyProperties(node, props, previous) {
     }
 }
 
-function removeProperty(node, propName, propValue, previous) {
+function removeProperty(node: Element, propName: string, propValue: any, previous?: Props) {
     if (previous) {
-        var previousValue = previous[propName]
+        var previousValue = previous.get(propName)
 
         if (!isHook(previousValue)) {
             if (propName === "attributes") {
@@ -37,7 +33,7 @@ function removeProperty(node, propName, propValue, previous) {
                 }
             } else if (propName === "style") {
                 for (var i in previousValue) {
-                    node.style[i] = ""
+                    node['style'][i] = ""
                 }
             } else if (typeof previousValue === "string") {
                 node[propName] = ""
@@ -50,8 +46,8 @@ function removeProperty(node, propName, propValue, previous) {
     }
 }
 
-function patchObject(node, props, previous, propName, propValue) {
-    var previousValue = previous ? previous[propName] : undefined
+function patchObject(node, props: Props, previous: Props | undefined, propName: string, propValue) {
+    const previousValue = previous && previous.get(propName)
 
     // Set attributes
     if (propName === "attributes") {
@@ -68,7 +64,7 @@ function patchObject(node, props, previous, propName, propValue) {
         return
     }
 
-    if(previousValue && isObject(previousValue) &&
+    if (previousValue && isObject(previousValue) &&
         getPrototype(previousValue) !== getPrototype(propValue)) {
         node[propName] = propValue
         return
